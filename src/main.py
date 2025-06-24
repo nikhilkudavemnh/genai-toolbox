@@ -1,31 +1,63 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-import uvicorn
-from api.endpoints import health, agent
-from config import settings
-from score.logging import logger
-
-app = FastAPI(
-    title=settings.app_name,
-    description="This is a sample FastAPI application with modular structure.",
-    debug=settings.debug
-)
-
-# Include routers
-app.include_router(health.router, prefix="/api/v1")
-app.include_router(agent.router, prefix="/api/v1")
+import time
+from .logger import logger
 
 @asynccontextmanager
-def lifespan(app: FastAPI):
-    """Application lifespan context manager for startup and shutdown events."""
-    logger.info("Starting application...")
+async def lifespan(app: FastAPI):
+    logger.info("Application starting up...")
     yield
-    logger.info("Shutting down application...")
+    logger.info("Application shutting down...")
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=5004,
-        reload=True
-    )
+app = FastAPI(lifespan=lifespan)
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    try:
+        response = await call_next(request)
+        process_time = round((time.time() - start_time) * 1000, 2)
+        
+        # Log successful request
+        logger.info("Request processed", extra={
+            "method": request.method,
+            "url": str(request.url),
+            "status_code": response.status_code,
+            "process_time_ms": process_time,
+            "client_ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent", "Unknown")
+        })
+        
+    except Exception as e:
+        process_time = round((time.time() - start_time) * 1000, 2)
+        
+        # Log error request with full traceback
+        logger.exception("Request processed with error", extra={
+            "method": request.method,
+            "url": str(request.url),
+            "status_code": 500,
+            "process_time_ms": process_time,
+            "client_ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent", "Unknown"),
+            "error": str(e)
+        })
+        
+        response = JSONResponse(
+            status_code=500,
+            content={"status": 500, "error": "Internal server error"}
+        )
+
+    return response
+
+@app.get("/")
+async def read_root():
+    # Fixed the division by zero error for testing
+    return {"status": "success", "message": "API is running"}
+
+@app.get("/test-error")
+async def test_error():
+    # Moved the error to a separate endpoint for testing
+    b = 100 / 0 
+    return {"status": b}
