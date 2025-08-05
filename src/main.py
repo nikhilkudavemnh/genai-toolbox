@@ -1,63 +1,56 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from rich import print as rprint
+from src.db.session import engine
 import time
-from .logger import logger
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application starting up...")
-    yield
-    logger.info("Application shutting down...")
 
-app = FastAPI(lifespan=lifespan)
+    yield  # App is now running
+    engine.dispose()
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    
-    try:
-        response = await call_next(request)
-        process_time = round((time.time() - start_time) * 1000, 2)
-        
-        # Log successful request
-        logger.info("Request processed", extra={
-            "method": request.method,
-            "url": str(request.url),
-            "status_code": response.status_code,
-            "process_time_ms": process_time,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent", "Unknown")
-        })
-        
-    except Exception as e:
-        process_time = round((time.time() - start_time) * 1000, 2)
-        
-        # Log error request with full traceback
-        logger.exception("Request processed with error", extra={
-            "method": request.method,
-            "url": str(request.url),
-            "status_code": 500,
-            "process_time_ms": process_time,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent", "Unknown"),
-            "error": str(e)
-        })
-        
-        response = JSONResponse(
-            status_code=500,
-            content={"status": 500, "error": "Internal server error"}
-        )
 
-    return response
 
-@app.get("/")
-async def read_root():
-    # Fixed the division by zero error for testing
-    return {"status": "success", "message": "API is running"}
+app = FastAPI(
+    title="🎨 Generative AI API",
+    description="Interact with cutting-edge AI endpoints.",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
-@app.get("/test-error")
-async def test_error():
-    # Moved the error to a separate endpoint for testing
-    b = 100 / 0 
-    return {"status": b}
+# Enable CORS if needed
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health", tags=["Monitoring"])
+async def health_check():
+    return {"statusCode": 200, "message": "Healthy 🎉"}
+
+
+@app.get("/health-full", tags=["Monitoring"])
+async def health_check_full(include_version: bool = Query(True, description="Include version info?")):
+    data = {
+        "statusCode": 200,
+        "message": "API is running ✔️"
+    }
+    if include_version:
+        data["version"] = "1.0.0"
+    return data
+
+
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import asyncio
+
+    uvicorn.run(app, host="0.0.0.0", port=8098)
