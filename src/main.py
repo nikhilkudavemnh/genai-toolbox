@@ -1,17 +1,17 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from rich import print as rprint
 from src.db.session import engine
-import time
+from src.db.base import Base
+from src.db.models.user import User, Role
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    yield  # App is now running
-    engine.dispose()
-
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -51,6 +51,4 @@ async def health_check_full(include_version: bool = Query(True, description="Inc
 
 if __name__ == "__main__":
     import uvicorn
-    import asyncio
-
     uvicorn.run(app, host="0.0.0.0", port=8098)
