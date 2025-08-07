@@ -3,7 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from src.db.session import engine
 from src.db.base import Base
-from src.db.models.user import User, Role
+from src.utils.tenant_util import get_schema_name
+from sqlalchemy import  text
+from fastapi.responses import JSONResponse
+from fastapi import Request
 
 
 @asynccontextmanager
@@ -29,6 +32,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def set_tenant_schema(request: Request, call_next):
+    tenant_id = request.headers.get("X-Tenant-ID")
+    if not tenant_id:
+        return JSONResponse({"error": "Missing tenant ID"}, status_code=400)
+
+    schema_name = await get_schema_name(tenant_id)
+
+    async with engine.begin() as conn:
+        await conn.execute(text(f"SET search_path TO {schema_name}, public"))
+        request.state.db = conn
+        response = await call_next(request)
+        return response
+
 
 
 @app.get("/health", tags=["Monitoring"])
