@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
 
 class TenantCreate(BaseModel):
-    id :int
+    tenant_id :int
     name: str

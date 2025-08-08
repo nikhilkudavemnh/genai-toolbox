@@ -1,12 +1,15 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from src.db.session import engine
-from src.db.base import Base
-from src.utils.tenant_util import get_schema_name
-from sqlalchemy import  text
+
+from fastapi import FastAPI, Query
+from fastapi import Request, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi import Request
+from sqlalchemy import text
+from fastapi.exceptions import HTTPException
+from src.apis.v1.tenant_routes import tenant_routes
+from src.db.base import Base
+from src.db.session import engine
+from src.utils.tenant_util import get_schema_name
 
 
 @asynccontextmanager
@@ -24,6 +27,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
 # Enable CORS if needed
 app.add_middleware(
     CORSMiddleware,
@@ -33,13 +37,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def get_tenant_id(x_tenant_id: str = Header(...)):
+    # Optionally validate the tenant ID
+    if not x_tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header missing")
+    return x_tenant_id
+
+app.include_router(
+    tenant_routes,
+    prefix="/v1/tenants",
+    tags=["Tenants"],
+    dependencies=[Depends(get_tenant_id)]
+)
 @app.middleware("http")
 async def set_tenant_schema(request: Request, call_next):
+    excluded_urls = ["/health", "/health-full","/docs", "/openapi.json"]
+    if request.url.path in excluded_urls:
+        response = await call_next(request)
+        return response
     tenant_id = request.headers.get("X-Tenant-ID")
     if not tenant_id:
         return JSONResponse({"error": "Missing tenant ID"}, status_code=400)
 
-    schema_name = await get_schema_name(tenant_id)
+    schema_name = await get_schema_name(int(tenant_id))
+    if not schema_name and request.url.path == '/v1/tenants/create':
+        response = await call_next(request)
+        return response
 
     async with engine.begin() as conn:
         await conn.execute(text(f"SET search_path TO {schema_name}, public"))
