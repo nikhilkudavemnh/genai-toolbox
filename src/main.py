@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, Query
 from fastapi import Request, Depends, Header
@@ -12,10 +13,31 @@ from src.db.session import engine
 from src.utils.tenant_util import get_schema_name
 
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        try:
+            # Fetch all schema names from the database
+            result = await conn.execute(text("SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'public')"))
+            schemas = [row[0] for row in result]
+            logger.info(f"Schemas found: {schemas}")
+
+            # Create tables for each schema
+            for schema in schemas:
+                try:
+                    logger.info(f"Setting search_path to {schema}")
+                    await conn.execute(text(f"SET search_path TO {schema}, public"))
+                    await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
+                    logger.info(f"Tables created for schema: {schema}")
+                except Exception as e:
+                    logger.error(f"Error creating tables for schema {schema}: {e}")
+        except Exception as e:
+            logger.error(f"Error fetching schemas: {e}")
+
     yield
     await engine.dispose()
 
@@ -51,7 +73,7 @@ app.include_router(
 )
 @app.middleware("http")
 async def set_tenant_schema(request: Request, call_next):
-    excluded_urls = ["/health", "/health-full","/docs", "/openapi.json"]
+    excluded_urls = ["/","/health", "/health-full","/docs", "/openapi.json"]
     if request.url.path in excluded_urls:
         response = await call_next(request)
         return response
@@ -72,12 +94,13 @@ async def set_tenant_schema(request: Request, call_next):
 
 
 
-@app.get("/health", tags=["Monitoring"])
+
+@app.get("/", tags=["Monitoring"])
 async def health_check():
     return {"statusCode": 200, "message": "Healthy 🎉"}
 
 
-@app.get("/health-full", tags=["Monitoring"])
+@app.get("/health", tags=["Monitoring"])
 async def health_check_full(include_version: bool = Query(True, description="Include version info?")):
     data = {
         "statusCode": 200,

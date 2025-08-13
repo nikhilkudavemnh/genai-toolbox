@@ -8,6 +8,7 @@ dependencies = [
     "alembic>=1.16.4",
     "asyncpg>=0.30.0",
     "fastapi>=0.116.1",
+    "passlib[bcrypt]>=1.7.4",
     "pydantic-settings>=2.10.1",
     "python-multipart>=0.0.20",
     "rich>=14.1.0",

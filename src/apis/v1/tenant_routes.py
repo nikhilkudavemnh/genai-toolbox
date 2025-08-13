@@ -22,6 +22,3 @@ async def create_tenant(data: TenantCreate):
             "schema_name": schema_name,
         })
     return data.model_dump()
-        # Optionally run migrations for the new schema
-
-a
